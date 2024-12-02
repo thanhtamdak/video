@@ -1,50 +1,83 @@
-const WebSocket = require('ws');
-const wss = new WebSocket.Server({ port: 8080 });
+// Import các thư viện cần thiết
+const express = require('express');
+const http = require('http');
+const socketIO = require('socket.io');
 
-let users = [];  // Mảng lưu danh sách người tham gia
+// Tạo ứng dụng Express và server HTTP
+const app = express();
+const server = http.createServer(app);
 
-// Khi có một kết nối WebSocket mới
-wss.on('connection', (ws) => {
-    console.log('Một người dùng đã kết nối');
-    
-    // Đăng ký sự kiện khi có message từ client
-    ws.on('message', (message) => {
-        const data = JSON.parse(message);
+// Khởi tạo Socket.IO
+const io = socketIO(server);
 
-        if (data.type === 'join') {
-            // Thêm người tham gia vào danh sách
-            users.push({ username: data.username, ws: ws });
-            console.log(`${data.username} đã tham gia`);
-            // Gửi danh sách người tham gia cho tất cả các client
-            broadcastUsers();
-        } 
-        else if (data.type === 'leave') {
-            // Xóa người tham gia khỏi danh sách
-            users = users.filter(user => user.username !== data.username);
-            console.log(`${data.username} đã rời đi`);
-            // Cập nhật danh sách người tham gia cho tất cả client
-            broadcastUsers();
+// Cung cấp tài nguyên tĩnh từ thư mục "public"
+app.use(express.static('public'));
+
+// Lưu trữ thông tin phòng
+const rooms = {};
+
+// Lắng nghe sự kiện "connection" từ Socket.IO
+io.on('connection', socket => {
+    console.log('Một người dùng đã kết nối: ' + socket.id);
+
+    // Lắng nghe sự kiện "join-room" từ client
+    socket.on('join-room', (roomId, userId, username) => {
+        // Nếu phòng chưa tồn tại, tạo mới
+        if (!rooms[roomId]) {
+            rooms[roomId] = [];
         }
-    });
 
-    // Hàm phát sóng danh sách người tham gia cho tất cả các client
-    function broadcastUsers() {
-        const userList = { type: 'update_users', users: users.map(user => user.username) };
-        wss.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(userList));
-            }
+        // Thêm người dùng vào phòng
+        rooms[roomId].push({ userId, username });
+        socket.join(roomId); // Tham gia phòng
+        console.log(`${username} đã tham gia phòng ${roomId}`);
+
+        // Thông báo cho các client khác trong phòng về người mới tham gia
+        socket.to(roomId).emit('user-connected', { userId, username });
+
+        // Gửi danh sách người dùng trong phòng cho người dùng mới tham gia
+        socket.emit('update-users', rooms[roomId]);
+
+        // Lắng nghe sự kiện "disconnect"
+        socket.on('disconnect', () => {
+            rooms[roomId] = rooms[roomId].filter(user => user.userId !== userId);
+            console.log(`${username} đã rời phòng ${roomId}`);
+            socket.to(roomId).emit('user-disconnected', { userId, username });
         });
-    }
 
-    // Khi kết nối WebSocket bị đóng
-    ws.on('close', () => {
-        // Xóa người dùng khỏi danh sách nếu kết nối bị đóng
-        users = users.filter(user => user.ws !== ws);
-        console.log('Kết nối bị đóng');
-        // Cập nhật danh sách người tham gia cho tất cả client
-        broadcastUsers();
+        // Lắng nghe tin nhắn trong phòng
+        socket.on('message', message => {
+            io.to(roomId).emit('message', message);
+        });
+
+        // Các sự kiện điều khiển như tắt/mở mic, video, chia sẻ màn hình
+        socket.on('mute-audio', userId => {
+            io.to(roomId).emit('mute-audio', userId);
+        });
+
+        socket.on('unmute-audio', userId => {
+            io.to(roomId).emit('unmute-audio', userId);
+        });
+
+        socket.on('stop-video', userId => {
+            io.to(roomId).emit('stop-video', userId);
+        });
+
+        socket.on('start-video', userId => {
+            io.to(roomId).emit('start-video', userId);
+        });
+
+        socket.on('share-screen', userId => {
+            io.to(roomId).emit('share-screen', userId);
+        });
+
+        socket.on('stop-share-screen', userId => {
+            io.to(roomId).emit('stop-share-screen', userId);
+        });
     });
 });
 
-console.log('WebSocket server đang chạy trên port 8080');
+// Lắng nghe port 3000
+server.listen(3000, () => {
+    console.log('Server đang chạy trên port 3000');
+});
