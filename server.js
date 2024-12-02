@@ -7,13 +7,13 @@ let users = [];  // Mảng lưu danh sách người tham gia
 wss.on('connection', (ws) => {
     console.log('Một người dùng đã kết nối');
     
-    // Nhận thông tin từ client
+    // Đăng ký sự kiện khi có message từ client
     ws.on('message', (message) => {
         const data = JSON.parse(message);
 
         if (data.type === 'join') {
             // Thêm người tham gia vào danh sách
-            users.push({ username: data.username });
+            users.push({ username: data.username, ws: ws });
             console.log(`${data.username} đã tham gia`);
             // Gửi danh sách người tham gia cho tất cả các client
             broadcastUsers();
@@ -29,7 +29,7 @@ wss.on('connection', (ws) => {
 
     // Hàm phát sóng danh sách người tham gia cho tất cả các client
     function broadcastUsers() {
-        const userList = { type: 'update_users', users: users };
+        const userList = { type: 'update_users', users: users.map(user => user.username) };
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify(userList));
@@ -39,7 +39,11 @@ wss.on('connection', (ws) => {
 
     // Khi kết nối WebSocket bị đóng
     ws.on('close', () => {
+        // Xóa người dùng khỏi danh sách nếu kết nối bị đóng
+        users = users.filter(user => user.ws !== ws);
         console.log('Kết nối bị đóng');
+        // Cập nhật danh sách người tham gia cho tất cả client
+        broadcastUsers();
     });
 });
 
